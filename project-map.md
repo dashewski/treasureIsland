@@ -35,14 +35,14 @@ The whole match lives through five statuses:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> waiting: player starts a search, no open match to join
-    waiting --> placement: second player joins
-    placement --> waiting: rollback, stake linking failed and no chest placed yet
-    waiting --> cancelled: 90 s without an opponent
-    placement --> cancelled: 45 s placement timeout or internal error
-    placement --> reveal: 4th chest placed
-    reveal --> ended: 4th move result recorded (played or skipped)
-    ended --> [*]: settled in PostgreSQL
+    [*] --> waiting: start search
+    waiting --> placement: player 2 joins
+    placement --> waiting: rollback
+    waiting --> cancelled: 90 s timeout
+    placement --> cancelled: 45 s timeout or error
+    placement --> reveal: 4 chests placed
+    reveal --> ended: 4 moves done
+    ended --> [*]: settled
     cancelled --> [*]: stakes released
 ```
 
@@ -60,11 +60,10 @@ match:<id>:reveal      separate Hash, appears with the first move
 
 ```mermaid
 flowchart LR
-    TG["Telegram client<br/>Mini App"] -->|"HTTPS + JWT"| API["Backend API<br/>Node.js + TypeScript"]
-    TG -.->|"initData signed by Telegram"| API
-    API -->|"atomic Lua scripts"| R[("Redis<br/>live match state, queues, locks")]
-    API -->|"transactions"| PG[("PostgreSQL<br/>players, balances, holds, history")]
-    W["Background worker<br/>timeouts and retries"] --> R
+    TG["Telegram Mini App"] -->|"HTTPS + JWT"| API["Backend API"]
+    API -->|"Lua scripts"| R[("Redis")]
+    API -->|"transactions"| PG[("PostgreSQL")]
+    W["Worker"] --> R
     W --> PG
 ```
 
@@ -384,26 +383,26 @@ Joining touches both Redis and PostgreSQL, so the order of steps and the rollbac
 
 ```mermaid
 sequenceDiagram
-    participant B as Player B (Mini App)
+    participant B as Player B
     participant API as Backend
     participant PG as PostgreSQL
-    participant R as Redis (Lua)
+    participant R as Redis
 
-    B->>API: POST /api/match/start (JWT)
-    API->>PG: reserveBid: lock player row, create hold
+    B->>API: POST /api/match/start
+    API->>PG: reserveBid (hold the stake)
     PG-->>API: holdId
-    API->>R: getMatchAction: reserve a waiting match (trylock NX PX 5000)
-    R-->>API: "join", matchId, lockToken
-    API->>R: redisJoinWaitingMatch: check token, add player2, start placement
-    R-->>API: match (status = placement)
-    API->>PG: linkHoldsToMatch(matchId, player1HoldId, holdId)
-    alt both holds linked
+    API->>R: getMatchAction (reserve a match)
+    R-->>API: join, matchId, token
+    API->>R: redisJoinWaitingMatch
+    R-->>API: match in placement
+    API->>PG: linkHoldsToMatch
+    alt holds linked
         PG-->>API: 2 rows updated
-        API-->>B: 200 + filtered match
+        API-->>B: 200 + match
     else linking failed
-        API->>R: rollbackRedisJoin: match back to waiting
-        API->>PG: releaseHold(player B's hold)
-        API-->>B: error "could not join, please try again"
+        API->>R: rollbackRedisJoin
+        API->>PG: releaseHold (player B)
+        API-->>B: error, try again
     end
 ```
 
@@ -1214,15 +1213,15 @@ Ending a game and paying it out are two separate steps, because a Lua script can
 
 ```mermaid
 flowchart TD
-    A["4th move result recorded<br/>resolveMove / resolveRevealTimeout"] -->|"same Lua script"| B["status = ended<br/>matchId added to settlement:matches"]
-    B --> C["trySettle → settleMatch"]
-    C --> D{"INSERT match_history<br/>ON CONFLICT DO NOTHING"}
-    D -->|"row inserted"| E["update both balances<br/>holds → consumed, COMMIT"]
-    D -->|"row already exists"| F["skip money: already settled"]
-    E --> G["cleanup: remove from settlement:matches<br/>set FINISHED_KEY_TTL"]
+    A["4th move recorded"] -->|"same Lua script"| B["ended, queued for settlement"]
+    B --> C["settleMatch"]
+    C --> D{"history row exists?"}
+    D -->|"no"| E["pay out, holds consumed"]
+    D -->|"yes"| F["skip, already paid"]
+    E --> G["remove from queue"]
     F --> G
-    C -->|"error, e.g. PostgreSQL down"| H["matchId stays in settlement:matches"]
-    H -->|"slow worker loop, every 10 s"| C
+    C -->|"PostgreSQL error"| H["stays in queue"]
+    H -->|"worker retry, 10 s"| C
 ```
 
 ### Payout rule
