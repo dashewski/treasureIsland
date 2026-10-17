@@ -1406,9 +1406,7 @@ All routes except the first one go through `authMiddleware`. The `playerId` come
 
 A state conflict means: not your turn, the phase is over, the chest is already placed, or the zone is already opened.
 
-## TODO
-
-Not yet described in this document:
+## Not yet described in this document (I'm building...):
 
 - Score rule (wins are currently counted by positive profit)
 - Withdrawal module (`withdrawals`)
