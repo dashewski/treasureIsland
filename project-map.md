@@ -2,9 +2,7 @@
 
 Treasure Island is a 1v1 PvP game that runs as a Telegram Mini App. This file describes how the game works inside: sign-in, matchmaking, game phases, timeouts, what happens when something crashes, and how a match is paid out.
 
-> Scope: this map covers only the internal logic of the app. External services such as deposits, payment processing, withdrawals and payouts, and other third-party providers are not part of it and will be described in separate documents. The first version runs on test credits.
-
-> Status: this is the design the backend is being built from. The code and its tests have to match what is written here.
+> Scope: this map covers only the internal logic of the app. External services such as deposits, payment processing, withdrawals and payouts, and other third-party providers are not part of it and will be described in separate documents.
 
 ## Contents
 
