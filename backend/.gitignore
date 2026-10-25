@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+
+# real env files stay local, the example has no values
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
+.DS_Store
