@@ -2,7 +2,9 @@
 
 Treasure Island is a 1v1 PvP game that runs as a Telegram Mini App. This file describes how the game works inside: sign-in, matchmaking, game phases, timeouts, what happens when something crashes, and how a match is paid out.
 
-> Scope: this map covers only the internal logic of the app. External services such as deposits, payment processing, withdrawals and payouts, and other third-party providers are not part of it and will be described in separate documents.
+> Scope: this map covers only the internal logic of the app. External services such as deposits, payment processing, withdrawals and payouts, and other third-party providers are not part of it and will be described in separate documents. The first version runs on test credits.
+
+> Status: this is the design the backend is being built from. The code and its tests have to match what is written here.
 
 ## Contents
 
@@ -20,8 +22,9 @@ Treasure Island is a 1v1 PvP game that runs as a Telegram Mini App. This file de
 12. [Reveal](#reveal)
 13. [Settlement](#settlement)
 14. [Worker](#worker)
-15. [API](#api)
-16. [TODO](#todo)
+15. [Reconnect](#reconnect)
+16. [API](#api)
+17. [TODO](#todo)
 
 ## The game in one minute
 
@@ -106,6 +109,7 @@ FINISHED_KEY_TTL = 600       // seconds, how long finished match keys stay in Re
 WORKER_FAST_INTERVAL = 1     // seconds, worker loop for reveal moves
 WORKER_SLOW_INTERVAL = 10    // seconds, all other worker tasks
 SETTLEMENT_MAX_FAILS = 10    // consecutive settlement failures before an emergency log entry
+POLL_INTERVAL = 2            // seconds, how often the Frontend polls GET /api/match/:matchId
 JWT_TTL = 600                // seconds
 INITDATA_MAX_AGE = 86400     // seconds, maximum age of auth_date
 ```
@@ -145,7 +149,7 @@ Returns: { token } / HTTP 401 / HTTP 500.
 ### Frontend: after the response
 
 ```
-→ got a token → stores the JWT in RAM
+→ got a token → stores the JWT in RAM → requests GET /api/me/reconnect (see Reconnect)
 → got HTTP 401 from /api/auth/telegram → shows "could not sign in";
   retrying with the same initData is pointless
 → got HTTP 500 → retries after a pause, a limited number of times
@@ -311,6 +315,9 @@ CREATE TABLE match_history (
   "createdAt" TIMESTAMP DEFAULT NOW(),  -- row creation date
   "finishedAt" TIMESTAMP                -- match end date
 );
+
+CREATE INDEX idx_history_player1 ON match_history("player1Id", "finishedAt" DESC);
+CREATE INDEX idx_history_player2 ON match_history("player2Id", "finishedAt" DESC);
 ```
 
 Example of `balance_holds` in action:
@@ -329,6 +336,8 @@ There is no foreign key on `refId`: it points either to a match stored in Redis 
 idx_holds_player_active: fast lookup of a specific player's active holds (to compute `available`). Built on `playerId`.
 
 idx_holds_expired: fast lookup of active holds whose `expiresAt` has passed (needed by `checkExpiredHolds`). Built on `expiresAt`.
+
+idx_history_player1, idx_history_player2: fast lookup of a player's last match (needed by `getLastFinishedMatch` for the main screen). A player can be both `player1Id` and `player2Id`, so there are two indexes. Both are built on the player id and `finishedAt`, newest first: inside one player the first entry is already the freshest, so the table does not have to be scanned or sorted.
 
 unique_active_match_hold_per_player: a unique index on `playerId` among rows with `status = 'active' AND type = 'match_bid'`. One player cannot have two active `match_bid` holds at the same time. This rules out a duplicate entry even if the check in `reserveBid` missed a race. There can be any number of `released` and `consumed` rows, and the index does not affect `withdrawal`. A violation of the index is PostgreSQL error `23505`, and `reserveBid` returns it as "already in game".
 
@@ -722,7 +731,7 @@ The placement/reveal branch of step 1 repairs one specific crash: the backend we
 
 ### checkPlayerInLiveMatch(playerId)
 
-Checks whether the player is in a match with status waiting, placement, or reveal.
+Looks for the player's live match: waiting, placement, reveal, or ended while settlement has not finished and the pointer is still alive.
 
 ```
 Takes: playerId
@@ -779,7 +788,9 @@ Does: determines the player's slot (p1 or p2) from requestingPlayerId
         opponentPlaced is not needed
     → if status === "ended": additionally reveals the full opponentPlacement
       and the outcome from calcSettlement(match) for the requesting player:
-      { result, profit, fee, payout }
+      { result, netProfit, fee, payout }
+      (netProfit = payout − bid, the profit after the fee; the same value is shown in
+      formatHistoryResponse. The pre-fee profit from calcSettlement is not sent out)
     → if status === "cancelled": adds cancelReason
 Returns: a safe object for the specific requestingPlayerId.
 ```
@@ -1380,6 +1391,141 @@ Does:
 
 Running several backend instances with workers does not break the data: every action is idempotent and atomic. It only adds extra load.
 
+## Reconnect
+
+Returning to the game after the app was closed, the connection dropped, or the Mini App reloaded. The JWT and the `matchId` live only in Frontend RAM, so after launch the Frontend does not know whether the player has a match. It asks the backend with one request, `GET /api/me/reconnect`.
+
+A live match is found in Redis through the pointer `player:<playerId>:currentMatch`. The result of the last played match comes from PostgreSQL (`match_history`). A finished match is not read from Redis for this: its keys live only `FINISHED_KEY_TTL`.
+
+While settlement has not finished, the pointer is alive and a match with `status = "ended"` is returned as the current one. `settleMatch` deletes the pointer only after COMMIT, and the `match_history` row is created earlier in the same transaction, so there is never a moment when the match is in neither Redis nor the history.
+
+Timeout cancellations (`matchmaking_timeout`, `placement_timeout`) and `internal_error` are not written to `match_history`, so the player is not shown them: the stake has already been returned. The history only holds the `redis_state_lost` cancellation (written by `recoverOrphanedHold`), and `getLastFinishedMatch` skips it.
+
+```mermaid
+flowchart TD
+    A["App opened, JWT issued"] --> B["GET /api/me/reconnect"]
+    B --> C{"live match in Redis?"}
+    C -->|"yes"| D["currentMatch"]
+    C -->|"no"| E{"played match in history?"}
+    E -->|"yes"| F["lastFinishedMatch"]
+    E -->|"no"| G["none"]
+    B -.->|"Redis or PostgreSQL error"| H["HTTP 500, Frontend retries"]
+```
+
+### Frontend: after sign-in
+
+```
+Does:
+    → got a JWT → sends GET /api/me/reconnect
+    → HTTP 200 → picks the screen by reconnectResult (table below)
+    → HTTP 401 → same as for any request: removes the JWT, repeats Auth,
+      repeats the request once
+    → HTTP 500 or no response → retries after a pause, a limited number of times,
+      then shows "Service temporarily unavailable, please try later"
+    → reconnectResult = "currentMatch" → remembers matchId from the response and then polls
+      GET /api/match/:matchId every POLL_INTERVAL seconds; polling stops when
+      status = "ended" or "cancelled"
+```
+
+### reconnect(playerId)
+
+Orchestrator. Called by the route `GET /api/me/reconnect` right after sign-in.
+
+```
+Takes: playerId from JWT.sub (req.playerId), no other input.
+Does: checkPlayerInLiveMatch(playerId)
+    → if a summary with matchId came back → loadMatch(matchId)
+        → if the match is found → formatMatchResponse(match, playerId)
+          → return reconnectResult = "currentMatch"
+        → if null came back (the match vanished between the two reads) → go to the history
+    → if null came back (no pointer, or the pointer exists but the match is gone) →
+      go to the history
+    → getLastFinishedMatch(playerId)
+        → if a row is found → formatHistoryResponse(row, playerId)
+          → return reconnectResult = "lastFinishedMatch"
+        → if there is no row → return reconnectResult = "none"
+    → if any function throws a technical Redis or PostgreSQL error → HTTP 500
+      ("none" is not substituted: a player who is in a match right now would see the
+      main screen with a "Start" button)
+Returns: { reconnectResult: "currentMatch", match } /
+    { reconnectResult: "lastFinishedMatch", match } / { reconnectResult: "none" } / HTTP 500.
+```
+
+Example, `currentMatch` (placement):
+
+```json
+{ "reconnectResult": "currentMatch",
+  "match": { "matchId": "550e8400-e29b-41d4-a716-446655440000", "status": "placement",
+    "bid": "5.00", "createdAt": 1792861800000, "stateVersion": 3,
+    "placementDeadline": 1792861845000, "currentTurn": null,
+    "myPlacement": { "big": 4, "small": null },
+    "opponentPlaced": { "big": true, "small": true } } }
+```
+
+Example, `lastFinishedMatch`:
+
+```json
+{ "reconnectResult": "lastFinishedMatch",
+  "match": { "matchId": "550e8400-e29b-41d4-a716-446655440000",
+    "finishedAt": 1792861860000, "outcome": "win", "netProfit": "3.60" } }
+```
+
+Example, `none`:
+
+```json
+{ "reconnectResult": "none" }
+```
+
+### Screen by response
+
+| reconnectResult     | match.status | Screen                                                                  |
+|---------------------|--------------|-------------------------------------------------------------------------|
+| `currentMatch`      | `waiting`    | searching for an opponent                                               |
+| `currentMatch`      | `placement`  | chest placement (`myPlacement`, `opponentPlaced`, timer by `placementDeadline`) |
+| `currentMatch`      | `reveal`     | moves (`currentTurn`, timer by `turnDeadline`, `myMoves`, `opponentMoves`) |
+| `currentMatch`      | `ended`      | match result (`opponentPlacement`, `result`, `netProfit`, `fee`, `payout`) |
+| `lastFinishedMatch` |              | main screen plus a row with the last match (`outcome`, `netProfit`, `finishedAt`) |
+| `none`              |              | main screen                                                             |
+
+### getLastFinishedMatch(playerId)
+
+The last played match of a player, from PostgreSQL. Live matches are not touched.
+
+```
+Takes: playerId
+Does: SELECT * FROM match_history
+    WHERE ("player1Id" = playerId OR "player2Id" = playerId) AND result = 'played'
+    ORDER BY "finishedAt" DESC LIMIT 1
+    (result = 'cancelled' is skipped: only recoverOrphanedHold writes such a row)
+    → if a row is found → return it
+    → if there is no row → return null
+Returns: a match_history row / null / throws an error if PostgreSQL fails.
+```
+
+The `OR` over two columns is checked with `EXPLAIN` during implementation. If `idx_history_player1` and `idx_history_player2` are not used, the query is replaced with two selects with `LIMIT 1`, one per column (`UNION ALL`), and the fresher row is taken.
+
+### formatHistoryResponse(row, requestingPlayerId)
+
+A history row reaches the Frontend only through this function, the same way a raw match goes through `formatMatchResponse`.
+
+```
+Takes: row (a match_history row with result = 'played'), requestingPlayerId (a string from the JWT)
+Does: compares numbers: Number(requestingPlayerId) with row.player1Id and row.player2Id
+    (the JWT holds the id as a string, match_history as an integer)
+    → if player1Id matches → slot "p1", payout = row.p1Winnings
+    → if player2Id matches → slot "p2", payout = row.p2Winnings
+    → if neither matches → throw an error (the row was found by this player's id,
+      so the data is corrupted)
+    → netProfit = payout − row.bid (computed in whole cents)
+    → outcome: netProfit > 0 → "win"; netProfit = 0 → "draw"; netProfit < 0 → "loss"
+    → finishedAt is converted to milliseconds (the column is TIMESTAMP; convert in UTC)
+    → builds { matchId, finishedAt, outcome, netProfit } (netProfit as a string, "3.60")
+    → never returns player1Id, player2Id, moves, fee, p1Winnings, p2Winnings
+Returns: { matchId, finishedAt, outcome, netProfit }.
+```
+
+The rule "a win is a positive profit" is the same as the one used to count `wins` in `settleMatch`.
+
 ## API
 
 ```
@@ -1388,6 +1534,7 @@ POST /api/match/start     empty body                                      → st
 POST /api/match/place     body { matchId, chestType, zoneId }             → placeChest
 POST /api/match/move      body { matchId, zoneId }                        → makeMove
 GET  /api/match/:matchId  no body                                         → getMatchStatus
+GET  /api/me/reconnect    no body                                         → reconnect
 ```
 
 All routes except the first one go through `authMiddleware`. The `playerId` comes only from the JWT, the stake only from a constant.
@@ -1400,14 +1547,15 @@ All routes except the first one go through `authMiddleware`. The `playerId` come
 | Not a participant of the match              | 403       |
 | Match not found                             | 404       |
 | Conflict with the current state (see below) | 409       |
+| Could not find a game (`startMatch` only)   | 503       |
 | Internal errors                             | 500       |
 
 A state conflict means: not your turn, the phase is over, the chest is already placed, or the zone is already opened.
 
-## Not yet described in this document (I'm building...):
+`reconnect` answers only 200, 401 and 500. A missing match is not an error, it is `reconnectResult = "none"`. The path `/api/me/reconnect` is outside `/api/match/`, so it never collides with `GET /api/match/:matchId`: the word "reconnect" cannot end up in `:matchId` whatever the order of route declarations.
 
-- Score rule (wins are currently counted by positive profit)
-- Withdrawal module (`withdrawals`)
-- Reconnect: `getCurrentMatch(playerId)`, returning to the game after a disconnect
-- Revenue report (`SUM(fee)` in `match_history`)
-- A `match_events` table for full restoration after losing Redis (after the MVP)
+Time in API responses is a number of milliseconds (as in Redis). The Frontend formats it itself as `DD.MM.YYYY - HH:MM` in the player's time zone (for example, `14.05.2026 - 17:14`).
+
+Money in API responses is a decimal string with two digits (`"5.00"`, `"3.60"`), not a floating-point number. The backend computes in whole cents (`calcSettlement`) and converts to a string only when building the response.
+
+`netProfit` in responses is the profit after the fee (`payout − bid`), the same in `formatMatchResponse` (for `ended`) and in `formatHistoryResponse`.
