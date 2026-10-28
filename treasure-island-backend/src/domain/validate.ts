@@ -2,14 +2,14 @@ import { ZONE_COUNT } from "../constants";
 import { ValidationError } from "../errors";
 import type { ChestType } from "../types/match";
 
-// crypto.randomUUID() returns a v4 UUID
+// crypto.randomUUID() makes v4
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_V4.test(value);
 }
 
-// matchId goes into Redis key names, so check it before touching Redis.
+// matchId ends up in Redis key names, check it first
 export function assertMatchId(matchId: unknown): asserts matchId is string {
   if (!isUuid(matchId)) {
     throw new ValidationError("invalid match id");
@@ -29,7 +29,7 @@ function isChestType(chestType: unknown): chestType is ChestType {
   return chestType === "big" || chestType === "small";
 }
 
-// Returns the checked values so callers don't have to cast.
+// returns typed values so callers don't need casts
 export function validatePlacement(
   zoneId: unknown,
   chestType: unknown,

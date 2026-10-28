@@ -1,4 +1,4 @@
-// Durations are in seconds. Redis and Lua store milliseconds, so multiply by 1000.
+// seconds; Redis keeps milliseconds, so multiply by 1000 for deadlines
 
 export const MATCH_STAKE = 5;
 export const MAX_MATCH_ATTEMPTS = 5;

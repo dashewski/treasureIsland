@@ -2,7 +2,7 @@ import { FEE_PERCENT } from "../constants";
 import type { Match, MoveNumber, MoveResult, PlayerSlot } from "../types/match";
 import { decimalToCents } from "./money";
 
-// All amounts are in cents.
+// amounts in cents
 export interface PlayerSettlement {
   found: number;
   kept: number;
@@ -61,7 +61,7 @@ export function calcSettlement(match: SettlementInput): Settlement {
     const kept = bidC - opponentFound;
     const result = found + kept;
     const profit = result - bidC;
-    // rounded down to the cent, in the player's favour
+    // round down, in the player's favour
     const fee = profit > 0 ? Math.floor((profit * FEE_PERCENT) / 100) : 0;
     return { found, kept, result, profit, fee, payout: result - fee };
   }

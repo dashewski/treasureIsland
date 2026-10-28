@@ -1,4 +1,4 @@
-// Money is integer cents inside the backend and a decimal string ("3.60") in API responses.
+// cents inside the backend, decimal string ("3.60") in API responses
 
 export function decimalToCents(value: string | number): number {
   const cents = Math.round(Number(value) * 100);

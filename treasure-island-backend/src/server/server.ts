@@ -18,7 +18,7 @@ app.get("/database", async (req, res) => {
   }
 });
 
-app.get("/redisClient", async (req, res) => {
+app.get("/redis", async (req, res) => {
   try {
     await redisClient.ping();
     res.json({ redis: true });

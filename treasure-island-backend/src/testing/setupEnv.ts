@@ -1,5 +1,4 @@
-// Runs before every test file. Tests always use the test database,
-// whatever DATABASE_URL the shell or .env has.
+// tests always run against the test database, whatever DATABASE_URL says
 import { userInfo } from "node:os";
 
 process.env["DATABASE_URL"] =
