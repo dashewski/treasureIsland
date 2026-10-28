@@ -14,7 +14,7 @@ function required(source: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-// Fail at startup, not in the middle of a request.
+// fail at startup, not in the middle of a request
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const port = Number(source["PORT"] ?? "3000");
   if (!Number.isInteger(port) || port <= 0) {

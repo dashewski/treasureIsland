@@ -8,8 +8,7 @@ interface TelegramUser {
   language_code?: string
 }
 
-// A row of the players table as the pg driver returns it:
-// BIGINT and NUMERIC come back as strings, TIMESTAMP as a Date.
+// pg returns BIGINT and NUMERIC as strings, TIMESTAMP as a Date
 export interface Player {
   id: number,
   tgid: string,

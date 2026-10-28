@@ -12,7 +12,7 @@ export type Reveal = Partial<
     Record<`${PlayerSlot}_move_${MoveNumber}_result`, MoveResult>
 >;
 
-// Redis stores everything as strings, loadMatch converts them to these types.
+// Redis keeps strings, loadMatch parses them into these types
 export interface Match {
   matchId: string;
   status: MatchStatus;
