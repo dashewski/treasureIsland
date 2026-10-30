@@ -1,4 +1,5 @@
 import { pool } from "../db/pool"
+import { InsufficientBalanceError } from "../errors"
 import { resetDb } from "../testing/resetDb"
 import { reserveBid } from "./reserveBid"
 
@@ -63,5 +64,55 @@ describe("reserveBid", () => {
     const holdB = await reserveBid(b)
 
     expect(holdA).not.toBe(holdB)
+  })
+})
+
+describe("reserveBid balance check", () => {
+  async function holdsOf(playerId: number) {
+    const { rows } = await pool.query(`SELECT * FROM balance_holds WHERE "playerId" = $1`, [playerId])
+    return rows
+  }
+
+  async function addHold(playerId: number, type: string, amount: number, status = "active") {
+    await pool.query(
+      `INSERT INTO balance_holds ("playerId", type, amount, status) VALUES ($1, $2, $3, $4)`,
+      [playerId, type, amount, status],
+    )
+  }
+
+  it("lets a player with exactly the stake in", async () => {
+    const playerId = await createPlayer(1, 5)
+    await expect(reserveBid(playerId)).resolves.toEqual(expect.any(Number))
+  })
+
+  it("refuses one cent less than the stake and creates no hold", async () => {
+    const playerId = await createPlayer(1, 4.99)
+
+    await expect(reserveBid(playerId)).rejects.toBeInstanceOf(InsufficientBalanceError)
+    expect(await holdsOf(playerId)).toHaveLength(0)
+  })
+
+  it("refuses a player with a zero balance", async () => {
+    const playerId = await createPlayer(1, 0)
+    await expect(reserveBid(playerId)).rejects.toBeInstanceOf(InsufficientBalanceError)
+  })
+
+  it("does not count frozen money as free", async () => {
+    const playerId = await createPlayer(1, 10)
+    await addHold(playerId, "withdrawal", 7)
+
+    await expect(reserveBid(playerId)).rejects.toBeInstanceOf(InsufficientBalanceError)
+  })
+
+  it("counts released and consumed holds as free money", async () => {
+    const playerId = await createPlayer(1, 10)
+    await addHold(playerId, "withdrawal", 7, "released")
+    await addHold(playerId, "match_bid", 5, "consumed")
+
+    await expect(reserveBid(playerId)).resolves.toEqual(expect.any(Number))
+  })
+
+  it("fails for a player that does not exist", async () => {
+    await expect(reserveBid(999)).rejects.toThrow("not found")
   })
 })
