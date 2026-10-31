@@ -11,3 +11,10 @@ export class InsufficientBalanceError extends Error {
     this.name = "InsufficientBalanceError"
   }
 }
+
+export class AlreadyInGameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AlreadyInGameError"
+  }
+}

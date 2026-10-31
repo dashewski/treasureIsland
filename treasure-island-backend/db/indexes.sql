@@ -1,0 +1,9 @@
+-- To write: run after schema.sql.
+--   psql -v ON_ERROR_STOP=1 -d <database> -f db/indexes.sql
+--
+-- balance_holds
+--   idx_holds_player_active              active holds of one player (free balance)
+--   idx_holds_expired                    active holds sorted by expiresAt (checkExpiredHolds)
+--   unique_active_match_hold_per_player  one active match_bid per player at most
+-- match_history
+--   idx_history_player1, idx_history_player2   last match of a player (player id, finishedAt)

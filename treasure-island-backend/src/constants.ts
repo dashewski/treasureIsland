@@ -4,6 +4,7 @@ export const MATCH_STAKE = 5;
 export const MAX_MATCH_ATTEMPTS = 5;
 export const MATCHMAKING_TIMEOUT = 90;
 export const HOLD_SAFETY_TIMEOUT = 120;
+export const MAX_DEADLOCK_ATTEMPTS = 3;
 export const PLACEMENT_TIMEOUT = 45;
 export const TURN_TIMEOUT = 30;
 export const FEE_PERCENT = 10;
