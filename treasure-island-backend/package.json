@@ -5,7 +5,7 @@
   "main": "dist/server/server.js",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/server/server.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-lua.js",
     "start": "node --env-file=.env dist/server/server.js",
     "typecheck": "tsc --noEmit",
     "test": "jest"
