@@ -18,3 +18,7 @@ export const JWT_TTL = 600;
 export const INITDATA_MAX_AGE = 86400;
 
 export const ZONE_COUNT = 5;
+
+// milliseconds, used as PX in Redis
+export const TRYLOCK_TTL_MS = 5000;
+export const CREATE_LOCK_TTL_MS = 2000;
