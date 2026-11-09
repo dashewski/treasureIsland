@@ -1,6 +1,7 @@
 import { redisClient } from "../redis/redisClient"
 import { createWaitingMatch } from "../matchmaking/createWaitingMatch"
 import { redisJoinWaitingMatch } from "../matchmaking/redisJoinWaitingMatch"
+import { resolvePlacement } from "../placement/resolvePlacement"
 
 export const createToken = "test-create-token"
 export const joinToken = "test-join-token"
@@ -29,5 +30,21 @@ export async function makeStartedMatch(
   await reserveForJoin(matchId)
   const joined = await redisJoinWaitingMatch(player2, hold2, matchId, joinToken)
   if (joined === null) throw new Error("the second player did not join")
+  return matchId
+}
+
+// zones of the chests in makeRevealMatch: p1 big 1, small 2; p2 big 3, small 4
+export async function makeRevealMatch(
+  player1: number,
+  hold1: number,
+  player2: number,
+  hold2: number,
+): Promise<string> {
+  const matchId = await makeStartedMatch(player1, hold1, player2, hold2)
+  await resolvePlacement(matchId, "p1", "big", 1)
+  await resolvePlacement(matchId, "p1", "small", 2)
+  await resolvePlacement(matchId, "p2", "big", 3)
+  const last = await resolvePlacement(matchId, "p2", "small", 4)
+  if (last !== "completed") throw new Error("the match did not reach reveal")
   return matchId
 }
