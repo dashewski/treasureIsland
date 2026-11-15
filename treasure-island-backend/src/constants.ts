@@ -22,3 +22,6 @@ export const ZONE_COUNT = 5;
 // milliseconds, used as PX in Redis
 export const TRYLOCK_TTL_MS = 5000;
 export const CREATE_LOCK_TTL_MS = 2000;
+
+// test credits given to a new player until the real deposit service exists
+export const TEST_START_BALANCE = 100;

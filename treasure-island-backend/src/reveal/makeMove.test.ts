@@ -12,7 +12,7 @@ let settleMatch: jest.SpyInstance
 beforeEach(async () => {
   await resetRedis()
   // the real settlement is a separate piece of work, here we only check that it is asked for
-  settleMatch = jest.spyOn(settleModule, "settleMatch").mockResolvedValue(undefined)
+  settleMatch = jest.spyOn(settleModule, "settleMatch").mockResolvedValue("settled")
   jest.spyOn(console, "error").mockImplementation(() => {})
 })
 
