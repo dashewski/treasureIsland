@@ -1,6 +1,7 @@
+import { TEST_START_BALANCE } from "../constants"
 import { pool } from "../db/pool"
 
-interface TelegramUser {
+export interface TelegramUser {
   id: number,
   first_name: string,
   last_name?: string,
@@ -23,8 +24,8 @@ export interface Player {
 
 export async function findOrCreatePlayer(userData: TelegramUser): Promise<Player> {
   const result = await pool.query<Player>(
-    "INSERT INTO players (tgid, player) VALUES ($1, $2) ON CONFLICT (tgid) DO UPDATE SET player = EXCLUDED.player RETURNING *",
-    [userData.id, userData.first_name],
+    "INSERT INTO players (tgid, player, balance) VALUES ($1, $2, $3) ON CONFLICT (tgid) DO UPDATE SET player = EXCLUDED.player RETURNING *",
+    [userData.id, userData.first_name, TEST_START_BALANCE],
   )
   const player = result.rows[0]
   if (!player) { throw new Error("findOrCreatePlayer: the query returned no row") }

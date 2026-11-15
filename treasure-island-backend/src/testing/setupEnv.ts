@@ -7,3 +7,7 @@ process.env["DATABASE_URL"] =
 
 // Redis db 1 is for tests, db 0 holds the real data
 process.env["REDIS_URL"] = process.env["TEST_REDIS_URL"] ?? "redis://localhost:6379/1";
+
+// fake values for tests, not real secrets
+process.env["JWT_SECRET"] ??= "test-jwt-secret";
+process.env["TELEGRAM_BOT_TOKEN"] ??= "123456:test-bot-token";

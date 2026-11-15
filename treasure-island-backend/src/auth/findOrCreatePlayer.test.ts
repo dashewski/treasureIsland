@@ -37,7 +37,7 @@ describe("findOrCreatePlayer", () => {
 
     expect(player.id).toBe(1);
     expect(player.player).toBe("Anna");
-    expect(player.balance).toBe("0.00");
+    expect(player.balance).toBe("100.00");
     expect(await playersWithTgid(279058397)).toHaveLength(1);
   });
 

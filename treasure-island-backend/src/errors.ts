@@ -42,3 +42,11 @@ export class ConflictError extends Error {
     this.name = "ConflictError";
   }
 }
+
+// HTTP 401: no or invalid credentials (initData, JWT)
+export class AuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
